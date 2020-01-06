@@ -1,212 +1,310 @@
-#coding:utf-8
 from burp import IBurpExtender
+from burp import ITab
 from burp import IScannerCheck
-from burp import IHttpRequestResponse
+from burp import IMessageEditorController
+from burp import IParameter
+from java.awt import Component;
+from java.io import PrintWriter;
+from java.util import ArrayList;
+from java.util import List;
+from javax.swing import JScrollPane;
+from javax.swing import JSplitPane;
+from javax.swing import JTabbedPane;
+from javax.swing import JTable;
+from javax.swing import SwingUtilities;
+from javax.swing.table import AbstractTableModel;
+from threading import Lock
+from urlparse import urlparse
 import re
 
-jsonp_dicts = ['callback','cb','jsonp','jsonpcallback','jsonpcb','jsonp_cb','call','jcb','json']
+jsonp_string = '&callback=jsonp1&cb=jsonp2&jsonp=jsonp3&jsonpcallback=jsonp4&jsonpcb=jsonp5&jsonp_cb=jsonp6&call=jsonp7&jcb=jsonp8&json=jsonp9'
+jsonp_dict = {'callback':'jsonp1','cb':'jsonp2','jsonp':'jsonp3','jsonpcallback':'jsonp4','jsonpcb':'jsonp5','jsonp_cb':'jsonp6','call':'jsonp7','jcb':'jsonp8','json':'jsonp9'}
+black_list = ['js','css','jpg','gif','png','zip','rar','bmp','jpeg','mp3','mp4','ico','txt']
 
-print('Author：P1g3')
-print('Blog：p1g3.github.io')
-print(' ')
+"""
+use for find jsonp feature in response just like callback({userinfo})
+"""
 
-jsonp_url = list()
-
-class BurpExtender(IBurpExtender, IScannerCheck,IHttpRequestResponse):
-
-    def registerExtenderCallbacks(self, callbacks):
-        # 保留对回调对象的引用
+class BurpExtender(IBurpExtender, ITab, IScannerCheck, IMessageEditorController, AbstractTableModel):
+    
+    #
+    # implement IBurpExtender
+    #
+    
+    def	registerExtenderCallbacks(self, callbacks):
+        # keep a reference to our callbacks object
         self._callbacks = callbacks
-
-        # 获取扩展助手对象
+        
+        # obtain an extension helpers object
         self._helpers = callbacks.getHelpers()
+        
+        # set our extension name
+        callbacks.setExtensionName("JSONP Hunter")
+        
+        # create the log and a lock on which to synchronize when adding log entries
+        self._log = ArrayList()
+        self._lock = Lock()
+        
+        # main split pane
+        self._splitpane = JSplitPane(JSplitPane.VERTICAL_SPLIT)
+        
+        # table of log entries
+        logTable = Table(self)
+        scrollPane = JScrollPane(logTable)
+        self._splitpane.setLeftComponent(scrollPane)
 
-        # 设置扩展名
-        callbacks.setExtensionName('Jsonp Hunter')
-
-        # 将自己注册为自定义扫描器检查
+        # tabs with request/response viewers
+        tabs = JTabbedPane()
+        self._requestViewer = callbacks.createMessageEditor(self, False)
+        self._responseViewer = callbacks.createMessageEditor(self, False)
+        tabs.addTab("Request", self._requestViewer.getComponent())
+        tabs.addTab("Response", self._responseViewer.getComponent())
+        self._splitpane.setRightComponent(tabs)
+        
+        # customize our UI components
+        callbacks.customizeUiComponent(self._splitpane)
+        callbacks.customizeUiComponent(logTable)
+        callbacks.customizeUiComponent(scrollPane)
+        callbacks.customizeUiComponent(tabs)
+        
+        # add the custom tab to Burp's UI
+        callbacks.addSuiteTab(self)
+        
+        # register ourselves as an HTTP listener
         callbacks.registerScannerCheck(self)
 
-    # 被动扫描时，执行
-    def processHttpMessage(self, toolFlag, messageIsRequest, messageinfo):
-        if toolFlag == 4 :
-            if messageIsRequest: #判断请求是否正在进行中
-                return
-
-    def doPassiveScan(self, baseRequestResponse):
-        #print(dir(self))
-        #request相关
-
-        request = baseRequestResponse.getRequest()
-        analyzedRequest, reqBodys,req_headers, req_method, req_parameters = self.getRequestInfo(request)
-        params = req_headers[0].split(' ')[1]
-        httpService = baseRequestResponse.getHttpService()
-        port = httpService.getPort()
-        host = httpService.getHost()
-        protocol = httpService.getProtocol()
-        # print(port)
-        # print(host)
-
-        #response相关
-        response = baseRequestResponse.getResponse()
-        res_headers,res_status_code,res_mime_type,res_bodys = self.getResponseInfo(response)
-        if req_headers[0].startswith('GET'):
-                jsonp_status = False
-                link = req_headers[0].split(' ')[1]
-                host = req_headers[1].split(' ')[1]
-                """
-                第一种情况：即请求中包含的value，在返回包内以value({.*?})的形式出现，可能会产生误报，因为并没有判断是否在开头出现。
-                """
-                params = req_headers[0].split(' ')[1]
-                params = params.split('?')
-                if(len(params)>1): #确认请求的url为xxx.xxx?xxx 而不是xxx.xxx
-                    if('&' in params[1]): #判断是否存在多个key=>value
-                        params = params[1].split('&')
-                        if(len(params))>0:
-                            for value in params:
-                                value = value.strip()
-                                if value != '':
-                                    if '=' in value:
-                                        value = value.split('=')[1]
-                                        pattern = value + '\(\{.*?\}\)'
-                                        try:
-                                            result = re.findall(pattern,res_bodys,re.S)
-                                        except:
-                                            result = []
-                                        if result!=[]:
-                                            url = protocol+'://'+host+link
-                                            if url not in jsonp_url:
-                                                print('*'*30+'JSONP FIND' + '*' * 30)
-                                                print('[+]URL：{} VALUE：{}'.format(url,value))
-                                                print('*'*70)
-                                                print(' ')
-                                                with open('jsonp.txt','a+') as f:
-                                                    f.write(url+'\n')
-                                                jsonp_url.append(url)
-                                                jsonp_status = True
-                    else:
-                        if '=' in str(params[1]):
-                            value = params[1].split('=')[1]
-                            value = value.strip()
-                            if value!='':
-                                pattern = value + '\(\{.*?\}\)'
-                                try:
-                                    result = re.findall(pattern,res_bodys,re.S)
-                                except:
-                                    pass
-                                if result!=[]:
-                                    url = protocol+'://'+host+link
-                                    if url not in jsonp_url:
-                                        print('*'*30+'JSONP FIND' + '*' * 30)
-                                        print('[+]URL：{} VALUE：{}'.format(url,value))
-                                        print('*'*70)
-                                        print(' ')
-                                        with open('jsonp.txt','a+') as f:
-                                            f.write(url+'\n')
-                                        jsonp_url.append(url)
-                                        jsonp_status = True
-                """
-                第二种情况：即请求包中的value并没有以value({.*?})的形式出现在返回包中，此时使用自定义字典进行rebuild，重新发包探测并判断。
-                """
-                if len(params)<=1 or not jsonp_status:
-                    againReqHeaders = req_headers
-                    #print(againReqHeaders[0])
-                    #print(reqHeaders)
-                    copyparams = params[0]
-                    if len(params) == 1:
-                        for _ in jsonp_dicts:
-                            # againReqHeaders = reqHeaders
-                            # print(againReqHeaders)
-                            #print(params[0])
-                            againReqHeaders[0] = req_headers[0].replace(params[0],copyparams + '?' + _ + '=p1g3')
-                            params[0] = copyparams + '?' + _ + '=' + 'p1g3'
-
-                            againReq = self._helpers.buildHttpMessage(againReqHeaders, reqBodys)
-                            ishttps = False
-                            if protocol == 'https':
-                                ishttps = True
-                            againRes = self._callbacks.makeHttpRequest(host, port, ishttps, againReq)
-                            link = againReqHeaders[0].split(' ')[1]
-                            host = againReqHeaders[1].split(' ')[1]
-                            analyzedrep = self._helpers.analyzeResponse(againRes)
-                            againResBodys = againRes[analyzedrep.getBodyOffset():].tostring()
-                            result = re.findall('p1g3\(\{.*?\}\)',againResBodys,re.S)
-                            if result!=[]:
-                                url = protocol+'://'+host+link
-                                if url not in jsonp_url:
-                                    print('*'*30+'JSONP FIND' + '*' * 30)
-                                    print('[+]URL：{} VALUE：{}'.format(url,'p1g3'))
-                                    print('*'*70)
-                                    print(' ')
-                                    with open('jsonp.txt','a+') as f:
-                                        f.write(url+'\n')
-                                    jsonp_url.append(url)
-                                    break
-                            #print(againReqHeaders[0])
-                            #print(againReqHeaders[0])
-                            #print(reqHeaders)
-                    else:
-                        try:
-                            params = req_headers[0].split(' ')[1]
-                            copyparams = params
-                            for _ in jsonp_dicts:
-                                againReqHeaders[0] = req_headers[0].replace(params,copyparams+'&'+_+'=p1g3')
-                                params = req_headers[0].split(' ')[1]
-
-                                againReq = self._helpers.buildHttpMessage(againReqHeaders, reqBodys)
-                                ishttps = False
-                                if protocol == 'https':
-                                    ishttps = True
-                                againRes = self._callbacks.makeHttpRequest(host, port, ishttps, againReq)
-                                link = againReqHeaders[0].split(' ')[1]
-                                host = againReqHeaders[1].split(' ')[1]
-                                #print(againReqHeaders)
-                            # print(reqBodys)
-                                analyzedrep = self._helpers.analyzeResponse(againRes)
-                                againResBodys = againRes[analyzedrep.getBodyOffset():].tostring()
-                                result = re.findall('p1g3\(\{.*?\}\)',againResBodys,re.S)
-                                if result!=[]:
-                                    url = protocol+'://'+host+link
-                                    if url not in jsonp_url:
-                                        print('*'*30+'JSONP FIND' + '*' * 30)
-                                        print('[+]URL：{} VALUE：{}'.format(protocol+'://'+host+link,'p1g3'))
-                                        print('*'*70)
-                                        print(' ')
-                                        with open('jsonp.txt','a+') as f:
-                                            f.write(url+'\n')
-                                        jsonp_url.append(url)
-                                        break
-                        except:
-                            pass
+        # id for column
+        self.id = 0
+        
+        return
+        
+    #
+    # implement ITab
+    #
     
-    def getRequestInfo(self, request):
-        analyzedRequest = self._helpers.analyzeRequest(request)
-        reqBodys = request[analyzedRequest.getBodyOffset():].tostring()
-        #print(type(analyzedRequest))
-        #print(reqBodys)
-
-        # 请求中包含的HTTP头信息
-        req_headers = analyzedRequest.getHeaders()
-        # 获取请求方法
-        req_method = analyzedRequest.getMethod()  
-        # 请求参数列表
-        req_parameters = analyzedRequest.getParameters()
-
-        return analyzedRequest, reqBodys,req_headers, req_method, req_parameters
+    def getTabCaption(self):
+        return "JsonpHunter"
     
-    def getResponseInfo(self, response):
-        analyzedResponse = self._helpers.analyzeResponse(response)
-
-        # 响应中包含的HTTP头信息
-        res_headers = analyzedResponse.getHeaders()
-        # 响应中包含的HTTP状态代码
-        res_status_code = analyzedResponse.getStatusCode()
-        # 响应中返回的数据返回类型
-        res_stated_mime_type = analyzedResponse.getStatedMimeType()
-        # 响应中返回的正文内容
-        res_bodys = response[analyzedResponse.getBodyOffset():].tostring() 
-
-        return res_headers, res_status_code, res_stated_mime_type, res_bodys
+    def getUiComponent(self):
+        return self._splitpane
+        
+    #
+    # implement IHttpListener
+    #
     
-    def doActiveScan(self, baseRequestResponse, insertionPoint):
+    # def processHttpMessage(self, toolFlag, messageIsRequest, messageInfo):
+    #     # only process requests
+    #     if messageIsRequest:
+    #         return
+        
+    #     # create a new log entry with the message details
+    #     self._lock.acquire()
+    #     row = self._log.size()
+    #     self._log.add(LogEntry(toolFlag, self._callbacks.saveBuffersToTempFiles(messageInfo), self._helpers.analyzeRequest(messageInfo).getUrl()))
+    #     self.fireTableRowsInserted(row, row)
+    #     self._lock.release()
+
+    # implement IScannerCheck
+
+    def doActiveScan(self,baseRequestResponse,insertionPoint):
         pass
+
+    def doPassiveScan(self,baseRequestResponse):
+        self.baseRequestResponse = baseRequestResponse
+        # service = baseRequestResponse.getHttpService()
+        result = self.scancheck(baseRequestResponse)
+        if result != [] and result !='' and result != None:
+            param,url = result
+            self.id +=1
+            #analyze_request = self._helpers.analyzeRequest(service,baseRequestResponse.getRequest())
+            self._lock.acquire()
+            row = self._log.size()
+            self._log.add(LogEntry(self.id,baseRequestResponse,param,url))
+            self.fireTableRowsInserted(row, row)
+            self._lock.release()
+        return
+    #
+    # extend AbstractTableModel
+    #
+    
+    def scancheck(self,baseRequestResponse):
+        host,port,protocol,method,headers,params,url,reqBodys,analyze_request = self.Get_RequestInfo(baseRequestResponse)
+        status_code,body = self.Get_ResponseInfo(baseRequestResponse)
+        """
+        deal with black_list if path like xxx.jpg or xxx.jpeg
+        """
+        parse_url = urlparse(url.toString())
+        url_path = parse_url.path
+        if url_path != '':
+            if '.' in url_path:
+                if url_path.split('.')[-1:][0] in black_list:
+                    return ''
+
+        if method == "GET":
+            if params !='':
+                """
+                extract value in response use value({}) like jsonp
+                """
+                split_params = params.split('&')
+                for param in split_params:
+                    if '=' in param:
+                        if len(param.split('=')) == 2:
+                            key,value = param.split('=')
+                            if value !='':
+                                jsonp_pattern = value + '\(\{.*?\}\)'
+                                re_result = re.findall(jsonp_pattern,body,re.S)
+                                if re_result:
+                                    return [key,url.toString()]
+                """
+                extract use jsonp_string
+                """
+                againReq_headers = headers
+                againReq_headers[0] = headers[0].replace(params,params+jsonp_string)
+                againReq =  self._helpers.buildHttpMessage(againReq_headers,reqBodys)
+                if protocol == 'https':
+                    is_https = True
+                else:
+                    is_https = False
+                againRes = self._callbacks.makeHttpRequest(host, port, is_https, againReq)
+                analyze_againRes = self._helpers.analyzeResponse(againRes)
+                againResBodys = againRes[analyze_againRes.getBodyOffset():].tostring()
+                for key,value in jsonp_dict.items():
+                    jsonp_pattern = value + '\(\{.*?\}\)'
+                    re_result = re.findall(jsonp_pattern,againResBodys,re.S)
+                    if re_result:
+                        link = againReq_headers[0].split(' ')[1]
+                        host = againReq_headers[1].split(' ')[1]
+                        url = protocol+'://'+host+link
+                        return [key,str(url)]
+                """
+                extract use jsonp_string with no params
+                """
+            else:
+                if '?' not in url.toString():
+                    path = headers[0].split(' ')[1]
+                    againReq_headers_use_noparam = headers
+                    againReq_headers_use_noparam[0] = headers[0].replace('GET '+path,'GET '+path+'?'+jsonp_string[1:])
+                    againReq = self._helpers.buildHttpMessage(againReq_headers_use_noparam, reqBodys)
+                    if protocol == 'https':
+                        is_https = True
+                    else:
+                        is_https = False
+                    againRes = self._callbacks.makeHttpRequest(host, port, is_https, againReq)
+                    analyze_againRes = self._helpers.analyzeResponse(againRes)
+                    againResBodys = againRes[analyze_againRes.getBodyOffset():].tostring()
+                    for key,value in jsonp_dict.items():
+                        jsonp_pattern = value + '\(\{.*?\}\)'
+                        re_result = re.findall(jsonp_pattern,againResBodys,re.S)
+                        if re_result:
+                            link = againReq_headers_use_noparam[0].split(' ')[1]
+                            host = againReq_headers_use_noparam[1].split(' ')[1]
+                            url = protocol+'://'+host+link
+                            return [key,str(url)]
+ 
+        return ''
+
+
+    
+    def Get_RequestInfo(self,baseRequestResponse):
+        """
+        extract about service
+        """
+        service = baseRequestResponse.getHttpService()
+        host = service.getHost()
+        port = service.getPort()
+        protocol = service.getProtocol()
+        """
+        extract request
+        """
+        analyze_request = self._helpers.analyzeRequest(service,baseRequestResponse.getRequest())
+        reqBodys = baseRequestResponse.getRequest()[analyze_request.getBodyOffset():].tostring()
+        url = analyze_request.getUrl()
+        headers = analyze_request.getHeaders()
+        method = analyze_request.getMethod()
+        params = [i for i in analyze_request.getParameters() if i.getType() == IParameter.PARAM_URL]
+        extract_params = '&'.join([('%s=%s' % (c.getName(),c.getValue())) for c in params ])
+
+        return host,port,protocol,method,headers,extract_params,url,reqBodys,analyze_request
+
+    def Get_ResponseInfo(self,baseRequestResponse):
+        """
+        extract response
+        """
+        analyze_response = self._helpers.analyzeResponse(baseRequestResponse.getResponse())
+        status_code = analyze_response.getStatusCode()
+        body =  baseRequestResponse.getResponse()[analyze_response.getBodyOffset():].tostring()
+
+        return status_code,body
+
+    def getRowCount(self):
+        try:
+            return self._log.size()
+        except:
+            return 0
+
+    def getColumnCount(self):
+        return 3
+
+    def getColumnName(self, columnIndex):
+        if columnIndex == 0:
+            return "ID"
+        if columnIndex == 1:
+            return "PARAM"
+        if columnIndex == 2:
+            return "URL"
+        return ""
+
+    def getValueAt(self, rowIndex, columnIndex):
+        logEntry = self._log.get(rowIndex)
+        if columnIndex == 0:
+            return logEntry._id
+        if columnIndex == 1:
+            return logEntry._param
+        if columnIndex == 2:
+            return logEntry._url
+        
+        return ""
+
+    #
+    # implement IMessageEditorController
+    # this allows our request/response viewers to obtain details about the messages being displayed
+    #
+    
+    def getHttpService(self):
+        return self._currentlyDisplayedItem.getHttpService()
+
+    def getRequest(self):
+        return self._currentlyDisplayedItem.getRequest()
+
+    def getResponse(self):
+        return self._currentlyDisplayedItem.getResponse()
+
+#
+# extend JTable to handle cell selection
+#
+    
+class Table(JTable):
+    def __init__(self, extender):
+        self._extender = extender
+        self.setModel(extender)
+    
+    def changeSelection(self, row, col, toggle, extend):
+    
+        # show the log entry for the selected row
+        logEntry = self._extender._log.get(row)
+        self._extender._requestViewer.setMessage(logEntry._requestResponse.getRequest(), True)
+        self._extender._responseViewer.setMessage(logEntry._requestResponse.getResponse(), False)
+        self._extender._currentlyDisplayedItem = logEntry._requestResponse
+        
+        JTable.changeSelection(self, row, col, toggle, extend)
+    
+#
+# class to hold details of each log entry
+#
+
+class LogEntry:
+    def __init__(self,record_id,requestResponse, param, url):
+        self._id = record_id
+        self._param = param
+        self._requestResponse = requestResponse
+        self._url = url
