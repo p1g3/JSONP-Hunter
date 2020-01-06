@@ -5,6 +5,11 @@
 
 存在JSONP特征的url会保存在插件目录下的jsonp.txt中。
 
-使用截图：
 
-![5a03db1ad8afad5cd26c52e3324fb041](https://tva1.sinaimg.cn/large/006tNbRwgy1ga3km6qjz4j31a80u0wqi.jpg)
+## update 2019.1.7
+
+add ui to show the info.
+
+just like this：
+
+![photo](https://s2.ax1x.com/2020/01/07/lyHUMQ.jpg)
