@@ -18,7 +18,7 @@ from urlparse import urlparse
 import re
 
 jsonp_string = '&callback=jsonp1&cb=jsonp2&jsonp=jsonp3&jsonpcallback=jsonp4&jsonpcb=jsonp5&jsonp_cb=jsonp6&call=jsonp7&jcb=jsonp8&json=jsonp9&cbk=jsonp10&jsonpCallback=jsonp11&jsonpcb=jsonp12&jsoncallback=jsonp13&method=jsonp14&callbackStatus=jsonp15&jsonp_callback=jsonp16'
-jsonp_dict = {'callback':'jsonp1','cb':'jsonp2','jsonp':'jsonp3','jsonpcallback':'jsonp4','jsonpcb':'jsonp5','jsonp_cb':'jsonp6','call':'jsonp7','jcb':'jsonp8','json':'jsonp9','cbk':'jsonp10','jsonpCallback':'jsonp11','jsonpcb':'jsonp12','jsoncallback':'jsonp13','call':'jsonp14','method':'jsonp15','callbackStatus':'jsonp16','jsonp_callback':'jsonp17'}
+jsonp_dict = {'callback':'jsonp1','cb':'jsonp2','jsonp':'jsonp3','jsonpcallback':'jsonp4','jsonpcb':'jsonp5','jsonp_cb':'jsonp6','call':'jsonp7','jcb':'jsonp8','json':'jsonp9','cbk':'jsonp10','jsonpCallback':'jsonp11','jsonpcb':'jsonp12','jsoncallback':'jsonp13','method':'jsonp14','callbackStatus':'jsonp15','jsonp_callback':'jsonp16'}
 black_list = ['js','css','jpg','gif','png','zip','rar','bmp','jpeg','mp3','mp4','ico','txt']
 
 """
